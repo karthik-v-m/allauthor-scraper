@@ -20,12 +20,19 @@ sheet.clear()
 sheet.append_row(["Book Title", "Book Link", "Author Name", "Author Link"])
 
 url = "https://allauthor.com/books/"
-headers = { "User-Agent": "Mozilla/5.0" }
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+}
 response = requests.get(url, headers=headers)
 soup = BeautifulSoup(response.content, "html.parser")
 
 rows = soup.select("tr.odd, tr.even")
 print(f"🧐 Found {len(rows)} books")
+
+if not rows:
+    print("⚠️ No books found! Site might be blocking Railway or layout changed.")
+    print("Page content preview:", soup.prettify()[:500])  # Debug tip
+
 
 for row in rows[:5]:
     try:
