@@ -1,146 +1,46 @@
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-import time
+import requests
+from bs4 import BeautifulSoup
 import gspread
-import os
-import json
 from oauth2client.service_account import ServiceAccountCredentials
+import json
+import os
 
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-
-# ✅ Railway-compatible: load creds from secret
 creds_dict = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
-def extract_book_id(book_url):
+sheet = client.open("AllAuthor Books").sheet1
+sheet.clear()
+sheet.append_row(["Book Title", "Book Link", "Author Name", "Author Link"])
+
+url = "https://allauthor.com/books/"
+headers = { "User-Agent": "Mozilla/5.0" }
+response = requests.get(url, headers=headers)
+soup = BeautifulSoup(response.content, "html.parser")
+
+rows = soup.select("tr.odd, tr.even")
+print(f"🧐 Found {len(rows)} books")
+
+for row in rows[:5]:
     try:
-        return book_url.split("/book/")[1].split("/")[0]
-    except:
-        return None
+        book_elem = row.select_one(".bookname a")
+        author_elem = row.select_one(".book-author-name a")
 
-def push_to_google_sheets(data):
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds_dict = json.loads(os.environ['GOOGLE_CREDS_JSON'])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
+        book_title = book_elem.text.strip()
+        book_link = book_elem["href"]
+        author_name = author_elem.text.strip()
+        author_link = author_elem["href"]
 
-    sheet = client.open("AllAuthor Books").sheet1  # Make sure this matches your actual sheet name
-    sheet.clear()
+        sheet.append_row([book_title, book_link, author_name, author_link])
+        print(f"✅ Added: {book_title} by {author_name}")
+    except Exception as e:
+        print(f"⚠️ Error: {e}")
+        continue
 
-    sheet.append_row([
-        "Book ID", "Book Title", "Book Link", "Author Name", "Author Link", "Author Website",
-        "Facebook", "Twitter", "Instagram", "Goodreads", "Amazon",
-        "YouTube", "Pinterest", "Linkedin", "Newsletter"
-    ])
-
-    for book in data:
-        sheet.append_row([
-            book.get("book_id"),
-            book.get("book_title"),
-            book.get("book_link"),
-            book.get("author_name"),
-            book.get("author_link"),
-            book.get("author_website"),
-            book.get("Facebook"),
-            book.get("Twitter"),
-            book.get("Instagram"),
-            book.get("Goodreads"),
-            book.get("Amazon"),
-            book.get("YouTube"),
-            book.get("Pinterest"),
-            book.get("Linkedin"),
-            book.get("Join Author's Newsletter")
-        ])
-
-def scrape_first_5_books():
-    options = Options()
-    options.headless = True
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-
-    driver.get("https://allauthor.com/books/")
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(2)
-
-    WebDriverWait(driver, 20).until(
-        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "tr.odd, tr.even"))
-    )
-
-    books = driver.find_elements(By.CSS_SELECTOR, "tr.odd, tr.even")
-    print(f"🧐 Found {len(books)} book rows on page")
-
-    results = []
-
-    for book in books[:5]:
-        try:
-            book_link = book.find_element(By.CSS_SELECTOR, ".bookname a").get_attribute("href")
-            book_title = book.find_element(By.CSS_SELECTOR, ".bookname a").text.strip()
-            author_name = book.find_element(By.CSS_SELECTOR, ".book-author-name a").text.strip()
-            author_link = book.find_element(By.CSS_SELECTOR, ".book-author-name a").get_attribute("href")
-            book_id = extract_book_id(book_link)
-
-            print(f"📘 {book_title} by {author_name}")
-
-            driver.execute_script("window.open(arguments[0]);", author_link)
-            driver.switch_to.window(driver.window_handles[1])
-            time.sleep(3)
-
-            try:
-                website_link = driver.find_element(By.XPATH, "//a[text()='Website']")
-                author_website = website_link.get_attribute("href")
-            except:
-                author_website = "N/A"
-
-            platforms = [
-                "Facebook", "Twitter", "Instagram", "Goodreads", "Amazon",
-                "YouTube", "Pinterest", "Linkedin", "Join Author's Newsletter"
-            ]
-            social_links = {platform: "" for platform in platforms}
-            links = driver.find_elements(By.TAG_NAME, "a")
-            for link in links:
-                try:
-                    text = link.text.strip()
-                    if text in social_links:
-                        social_links[text] = link.get_attribute("href")
-                except:
-                    continue
-
-            driver.close()
-            driver.switch_to.window(driver.window_handles[0])
-
-            results.append({
-                "book_id": book_id,
-                "book_title": book_title,
-                "book_link": book_link,
-                "author_name": author_name,
-                "author_link": author_link,
-                "author_website": author_website,
-                **social_links
-            })
-
-        except Exception as e:
-            print(f"⚠️ Error: {e}")
-            continue
-
-    driver.quit()
-
-    push_to_google_sheets(results)
-    print(f"✅ Scraped {len(results)} books and uploaded to Google Sheets!")
-
-if __name__ == "__main__":
-    scrape_first_5_books()
+print("✅ Finished uploading 5 books to Google Sheets!")
